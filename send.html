@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bibiche TV · Envoyer</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;padding:16px 16px 28px;color:#F4F6FF;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:radial-gradient(600px 500px at 8% 0,rgba(124,92,255,.55),transparent 60%),
+             radial-gradient(600px 500px at 100% 100%,rgba(53,208,230,.4),transparent 60%),#0A0F1E}
+main{max-width:520px;margin:0 auto}
+h1{margin:4px 0 2px;font-size:26px}
+#status{margin:0 0 14px;font-size:14px;opacity:.75}
+.card{padding:14px;border-radius:24px;border:1px solid rgba(255,255,255,.2);
+  background:linear-gradient(135deg,rgba(255,255,255,.14),rgba(255,255,255,.05));
+  -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+.tabs{display:flex;margin-bottom:12px}
+.tabs button{flex:1;padding:12px;font-size:16px;font-weight:600;color:inherit;border:1px solid rgba(255,255,255,.2);
+  background:transparent;border-radius:14px 0 0 14px}
+.tabs button+button{border-radius:0 14px 14px 0;border-left:0}
+.tabs button.on{background:rgba(255,255,255,.2)}
+.pane{display:none}.pane.on{display:block}
+canvas{display:block;width:100%;height:auto;touch-action:none;border-radius:16px;background:#0d1330;
+  border:1px solid rgba(255,255,255,.15)}
+textarea{width:100%;height:140px;padding:14px;font:600 20px/1.3 inherit;color:#fff;resize:none;
+  background:rgba(8,12,30,.5);border:1px solid rgba(255,255,255,.2);border-radius:16px}
+.row{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+.chips button{width:34px;height:34px;margin-right:8px;border-radius:17px;border:2px solid rgba(255,255,255,.3)}
+.chips button.on{border-color:#fff;transform:scale(1.15)}
+.w button{width:44px;height:34px;margin-left:6px;color:inherit;border:1px solid rgba(255,255,255,.25);
+  background:transparent;border-radius:10px;font-size:18px}
+.w button.on{background:rgba(255,255,255,.22)}
+.act{display:flex;margin-top:14px}
+.act button{flex:1;padding:14px;font-size:17px;font-weight:700;color:#fff;border:0;border-radius:14px;
+  background:linear-gradient(135deg,#7C5CFF,#35D0E6)}
+.act button.ghost{flex:0 0 38%;margin-right:10px;background:rgba(255,255,255,.14)}
+body.nolink .card{opacity:.35;pointer-events:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>Bibiche TV</h1>
+  <p id="status">connexion…</p>
+  <div class="card">
+    <div class="tabs">
+      <button id="tabText" class="on">Message</button>
+      <button id="tabDraw">Dessin</button>
+    </div>
+
+    <section id="paneText" class="pane on">
+      <textarea id="msg" maxlength="140" placeholder="Écris un mot pour la TV…"></textarea>
+      <div class="row"><div class="chips" id="textColors"></div></div>
+      <div class="act"><button id="sendText">Afficher sur la TV</button></div>
+    </section>
+
+    <section id="paneDraw" class="pane">
+      <canvas id="cv" width="1000" height="750"></canvas>
+      <div class="row">
+        <div class="chips" id="drawColors"></div>
+        <div class="w" id="widths"></div>
+      </div>
+      <div class="act"><button class="ghost" id="clearDraw">Effacer</button><button id="hint" disabled style="opacity:.7">Envoi en direct</button></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  var RELAY = 'https://ntfy.sh';   // même valeur que CONFIG.relay côté TV
+  var COLORS = ['#FFFFFF', '#FFD166', '#FF6B8B', '#7C5CFF', '#35D0E6', '#7BE495'];
+  var WIDTHS = [6, 12, 22];
+  var $ = function (id) { return document.getElementById(id); };
+  var topic = (location.hash || '').replace('#', '').replace(/[^a-z0-9_-]/gi, '');
+  var statusEl = $('status');
+
+  if (!topic) {
+    statusEl.textContent = 'Scanne le QR code affiché sur la TV pour commencer.';
+    document.body.classList.add('nolink');
+    return;
+  }
+  statusEl.textContent = 'Prêt : ce que tu envoies apparaît sur la TV.';
+
+  // ---------- envoi (file ordonnée, reprise si limite de débit) ----------
+  var queue = [], busy = false;
+  function enqueue(obj) { queue.push(JSON.stringify(obj)); pump(); }
+  function pump() {
+    if (busy || !queue.length) return;
+    busy = true;
+    fetch(RELAY + '/' + topic, { method: 'POST', body: queue[0] }).then(function (r) {
+      if (r.status === 429) throw { wait: 5000 };
+      if (!r.ok) throw { wait: 3000 };
+      queue.shift(); busy = false; statusEl.textContent = 'Envoyé.'; pump();
+    }).catch(function (e) {
+      statusEl.textContent = 'Envoi en attente…';
+      busy = false; setTimeout(pump, (e && e.wait) || 3000);
+    });
+  }
+
+  // ---------- onglets ----------
+  function tab(on) {
+    $('tabText').className = on === 'text' ? 'on' : ''; $('tabDraw').className = on === 'draw' ? 'on' : '';
+    $('paneText').className = 'pane' + (on === 'text' ? ' on' : ''); $('paneDraw').className = 'pane' + (on === 'draw' ? ' on' : '');
+  }
+  $('tabText').onclick = function () { tab('text'); };
+  $('tabDraw').onclick = function () { tab('draw'); };
+
+  function chips(containerId, onPick) {
+    var box = $(containerId);
+    COLORS.forEach(function (c, i) {
+      var b = document.createElement('button'); b.style.background = c; if (i === 0) b.className = 'on';
+      b.onclick = function () { Array.prototype.forEach.call(box.children, function (x) { x.className = ''; }); b.className = 'on'; onPick(c); };
+      box.appendChild(b);
+    });
+  }
+
+  // ---------- message ----------
+  var textColor = COLORS[0];
+  chips('textColors', function (c) { textColor = c; });
+  $('sendText').onclick = function () {
+    var t = $('msg').value.trim(); if (!t) return;
+    enqueue({ v: 1, t: 'x', x: t, c: textColor });
+  };
+
+  // ---------- dessin ----------
+  var cv = $('cv'), ctx = cv.getContext('2d'), color = COLORS[0], width = WIDTHS[1];
+  var strokes = [], cur = null, timer = null;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  chips('drawColors', function (c) { color = c; });
+  WIDTHS.forEach(function (w, i) {
+    var b = document.createElement('button'); b.textContent = ['•', '●', '⬤'][i]; if (w === width) b.className = 'on';
+    b.onclick = function () { Array.prototype.forEach.call($('widths').children, function (x) { x.className = ''; }); b.className = 'on'; width = w; };
+    $('widths').appendChild(b);
+  });
+
+  function pos(e) {
+    var r = cv.getBoundingClientRect();
+    return [Math.round((e.clientX - r.left) * 1000 / r.width), Math.round((e.clientY - r.top) * 750 / r.height)];
+  }
+  function seg(c, w, x1, y1, x2, y2) {
+    ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    var p = pos(e); cur = { c: color, w: width, p: [p[0], p[1]], sent: 0 }; strokes.push(cur);
+    seg(cur.c, cur.w, p[0], p[1], p[0] + 0.1, p[1]); schedule();
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!cur) return;
+    var p = pos(e), n = cur.p.length, dx = p[0] - cur.p[n - 2], dy = p[1] - cur.p[n - 1];
+    if (dx * dx + dy * dy < 9) return;                     // on ignore les micro-mouvements
+    seg(cur.c, cur.w, cur.p[n - 2], cur.p[n - 1], p[0], p[1]); cur.p.push(p[0], p[1]);
+  });
+  function end() {
+    if (!cur) return;
+    if (cur.p.length === 2) cur.p.push(cur.p[0] + 1, cur.p[1]);
+    cur = null; schedule(true);
+  }
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+
+  function schedule(fast) {
+    if (timer && !fast) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () { timer = null; flush(); if (cur) schedule(); }, fast ? 120 : 700);
+  }
+
+  // Envoie uniquement les points nouveaux (diff), découpés pour rester < 4 Ko par message
+  function flush() {
+    var pieces = [];
+    strokes.forEach(function (s) {
+      if (s.p.length === s.sent) return;
+      var arr = s.p.slice(s.sent > 0 ? s.sent - 2 : 0);    // 1 point de recouvrement => trait continu
+      for (var i = 0; ; i += 398) {
+        var ch = arr.slice(i, i + 400);
+        if (ch.length >= 2) pieces.push({ c: s.c, w: s.w, p: ch });
+        if (i + 400 >= arr.length) break;
+      }
+      s.sent = s.p.length;
+    });
+    var batch = [], len = 20;
+    pieces.forEach(function (pc) {
+      var l = JSON.stringify(pc).length + 1;
+      if (len + l > 3500 && batch.length) { enqueue({ v: 1, t: 'd', s: batch }); batch = []; len = 20; }
+      batch.push(pc); len += l;
+    });
+    if (batch.length) enqueue({ v: 1, t: 'd', s: batch });
+  }
+
+  $('clearDraw').onclick = function () {
+    strokes = []; cur = null; ctx.clearRect(0, 0, 1000, 750); enqueue({ v: 1, t: 'c' });
+  };
+})();
+</script>
+</body>
+</html>
